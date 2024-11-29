@@ -1,0 +1,565 @@
+pip install opencv-python dlib
+
+
+
+import tensorflow as tf
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from google.colab import files
+files.upload()
+
+!pip install kaggle
+
+!mkdir -p ~/.kaggle
+!cp kaggle.json ~/.kaggle/
+!chmod 600 ~/.kaggle/kaggle.json
+
+!kaggle competitions download -c aia-xt131-face-recognition
+!unzip aia-xt131-face-recognition.zip
+
+
+import cv2
+import dlib
+import os
+import numpy as np
+
+# 确保已经安装并导入了cv2和dlib
+detector = dlib.get_frontal_face_detector()
+
+def extract_and_resize_face(image_path, output_size=(256, 256)):
+    try:
+        image = cv2.imread(image_path)
+        if image is None:
+            print(f"无法读取图像: {image_path}")
+            return None
+
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        dets = detector(image_rgb, 1)
+        if len(dets) == 0:
+            return None
+
+        d = dets[0]
+        crop_image = image_rgb[d.top():d.bottom(), d.left():d.right()]
+        resized_image = cv2.resize(crop_image, output_size)
+        return resized_image
+    except cv2.error as e:
+        print(f"OpenCV错误跳过图像: {image_path}, 错误: {e}")
+        return None
+
+def process_images(paths):
+    for original_dir, new_dir in paths:
+        if not os.path.exists(new_dir):
+            os.makedirs(new_dir)
+
+        for filename in os.listdir(original_dir):
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                original_path = os.path.join(original_dir, filename)
+                new_path = os.path.join(new_dir, filename)
+
+                face_image = extract_and_resize_face(original_path)
+
+                if face_image is not None:
+                    face_image_bgr = cv2.cvtColor(face_image, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(new_path, face_image_bgr)
+                    print(f"已保存新图像: {new_path}")
+                else:
+                    original_image = cv2.imread(original_path)
+                    if original_image is not None:
+                        cv2.imwrite(new_path, original_image)
+                        print(f"已保存舊图像: {new_path}")
+                    else:
+                        print(f"无法读取图像: {original_path}, 已跳过。")
+
+# 路径设置，每个元素是一个包含原始和新目录的元组
+paths = [
+    ('/content/Test', '/content/Test_new'),
+    ('/content/Train/Jennie', '/content/Train_new/Jennie'),
+    ('/content/Train/Jisoo', '/content/Train_new/Jisoo'),
+    ('/content/Train/Lisa', '/content/Train_new/Lisa'),
+    ('/content/Train/Others', '/content/Train_new/Others'),
+    ('/content/Train/Rose', '/content/Train_new/Rose'),
+]
+
+process_images(paths)
+
+
+
+# 使用函数
+image_path = '/content/Train/Jennie/adviddsssi.jpg'  # 更改为你的图片路径
+extract_and_resize_face(image_path)
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# 設定參數
+img_width, img_height = 128, 128
+batch_size = 32
+
+train_data_dir = '/content/Train_new'
+test_data_dir = '/content/Test_new'
+
+##資料增強
+datagen = ImageDataGenerator(
+    rescale=1. / 255,  # 对图片的每个像素值进行缩放
+    fill_mode='nearest',  # 用于填充新创建像素的方法，如旋转或宽度/高度平移
+    validation_split=0.2  # 数据集的划分比例，20%用于验证
+)
+
+# 使用subset參數
+
+train_generator = datagen.flow_from_directory(
+    train_data_dir,
+    target_size=(img_width, img_height),
+    batch_size=batch_size,
+    class_mode='categorical',
+    subset='training',
+    classes=['Jennie', 'Jisoo', 'Lisa', 'Rose', 'Others']
+
+)
+
+validation_generator = datagen.flow_from_directory(
+    train_data_dir,
+    target_size=(img_width, img_height),
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False,
+    subset='validation',  # 'validation' subset
+    classes=['Jennie', 'Jisoo', 'Lisa', 'Rose', 'Others']
+)
+
+
+
+
+
+# 讀取 sample.submission.csv 檔案
+submission_df = pd.read_csv('/content/SampleSubmission.csv')
+# 假設圖片是 JPG 格式，如果不是請相應調整
+submission_df['filename'] = submission_df['filename'].apply(lambda x: f'{x}.jpg')
+# 獲取 test_data_dir 中的所有檔案名稱
+available_filenames = os.listdir(test_data_dir)
+# 過濾出存在於資料夾中的圖片檔案
+submission_df = submission_df[submission_df['filename'].isin(available_filenames)]
+# 建立一個 DataFrame，包含排序後的圖片檔案名稱
+test_df = pd.DataFrame({
+    'filename': submission_df['filename']
+})
+
+
+
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+# 使用 flow_from_dataframe 方法
+test_generator = test_datagen.flow_from_dataframe(
+    dataframe=test_df,
+    directory=test_data_dir,
+    x_col='filename',
+    y_col=None,
+    target_size=(img_width, img_height),
+    color_mode='rgb',
+    class_mode=None,
+    batch_size=batch_size,
+    shuffle=False
+)
+
+def plot_from_generator(generator, num_images=8, rows=2, cols=4):
+    """ 顯示從生成器中取得的圖片 """
+    data_batch = next(generator)
+    images, labels = data_batch[0], data_batch[1]
+
+    plt.figure(figsize=(cols * 3, rows * 3))
+
+    # 顯示圖片和對應的標籤
+    for i in range(num_images):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(images[i])
+
+        # 找出標籤的索引
+        label_index = int(labels[i].argmax())
+        plt.title(f"Label: {label_index}")
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+plot_from_generator(train_generator, num_images=16, rows=4, cols=4)
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (Input, Dense, Dropout,Activation, Flatten,
+                    Conv2D,MaxPooling2D, BatchNormalization,GlobalAveragePooling2D)
+model = Sequential()
+model.add(Conv2D(32, (3, 3), input_shape=(img_width, img_height, 3)))
+model.add(Activation('relu'))
+
+model.add(Conv2D(32, (3, 3), input_shape=(img_width, img_height, 3)))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+
+model.add(Conv2D(64, (3, 3)))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+model.add(Conv2D(64, (3, 3)))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+
+model.add(Conv2D(128, (3, 3), padding='same'))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+model.add(Conv2D(128, (3, 3), padding='same'))
+model.add(Activation('relu'))
+
+model.add(Conv2D(256, (3, 3), padding='same'))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+model.add(Conv2D(256, (3, 3), padding='same'))
+model.add(BatchNormalization())
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+
+#model.add(Flatten())
+model.add(GlobalAveragePooling2D())
+
+model.add(Dense(512, activation='relu'))
+model.add(Dropout(0.2))
+model.add(Dense(5, activation='softmax'))
+
+model.compile(loss='categorical_crossentropy',
+              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+              metrics=['accuracy'])
+model.summary()
+
+from tensorflow.keras.utils import plot_model
+
+# model.summary()
+plot_model(model, to_file='ex_Model.png', show_shapes=True)
+
+# 使用 ModelCheckpoint 回存最佳模型權重
+from tensorflow.keras.callbacks import ModelCheckpoint
+
+checkpoint = ModelCheckpoint('best_model_weights.h5', monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+
+epochs = 80
+
+history = model.fit(
+    train_generator,
+    epochs=epochs,
+    validation_data=validation_generator,
+    callbacks=[checkpoint]    # 將 ModelCheckpoint 回調添加到訓練過程中
+)
+
+# 加載保存的最佳模型權重
+model.load_weights('best_model_weights.h5')
+
+# 使用 ModelCheckpoint 回存最佳模型權重
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+
+checkpoint = ModelCheckpoint('best_model_weights.h5', monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+
+# 实例化回调函数
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',  # 监测的指标
+    factor=0.1,  # 学习率被减少的因数。新的学习率 = 学习率 * 因数
+    patience=5,  # 没有进步的训练轮数，在这之后学习率会被减少
+    min_lr=0.0000001,  # 学习率的下限
+    verbose=1  # 更新信息的详细程度：0 = 安静，1 = 更新信息
+)
+
+checkpoint = ModelCheckpoint('best_model_weights.h5', monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+
+epochs = 50
+
+history = model.fit(
+    train_generator,
+    epochs=epochs,
+    validation_data=validation_generator,
+    callbacks=[checkpoint, reduce_lr ]    # 將 ModelCheckpoint 回調添加到訓練過程中
+)
+
+# 加載保存的最佳模型權重
+model.load_weights('best_model_weights.h5')
+
+# 獲取歷史數據
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs_range = range(1, len(acc) + 1)
+
+# Accuracy 曲線
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, acc, 'bo', label='train accuracy')
+plt.plot(epochs_range, val_acc, 'b', label='validation accuracy')
+plt.title('Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+# Loss 曲線
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, loss, 'bo', label='train loss')
+plt.plot(epochs_range, val_loss, 'b', label='validation loss')
+plt.title('Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+from sklearn.metrics import confusion_matrix
+
+# 1. 使用模型進行預測
+y_pred = model.predict(validation_generator)
+y_pred_classes = np.argmax(y_pred, axis=1)  # 取得預測的類別索引
+y_true = validation_generator.classes  # 取得真實的類別索引
+
+# 2. 產生混淆矩陣
+cm = confusion_matrix(y_true, y_pred_classes)
+
+# 3. 繪製混淆矩陣
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=validation_generator.class_indices, yticklabels=validation_generator.class_indices)
+plt.ylabel('Real class')
+plt.xlabel('Predict class')
+plt.title('confusion matrix')
+plt.show()
+
+from sklearn.metrics import classification_report
+import numpy as np
+
+# 1. 使用模型在驗證集上進行預測
+y_pred = model.predict(validation_generator)
+y_pred_classes = np.argmax(y_pred, axis=1)
+
+# 獲取真實的標籤
+y_true = validation_generator.classes
+
+# 2. 使用 scikit-learn 計算 precision 和 recall
+report = classification_report(y_true, y_pred_classes, target_names=list(validation_generator.class_indices.keys()))
+
+print(report)
+
+filenames = [filename.split('/')[-1] for filename in test_generator.filenames]  # 只取文件名，去除路徑
+predictions = model.predict(test_generator, verbose=1)
+predicted_classes = np.argmax(predictions, axis=1)
+
+predicted_classes
+
+submission_df = pd.read_csv('/content/SampleSubmission.csv')
+submission_df = submission_df.set_index('filename')   # 確保這裡的列名和 CSV 檔案中的一致
+submission_df = submission_df.reindex(filenames)  # 重新索引以匹配 filenames 的順序
+submission_df = submission_df.reset_index()
+
+submission_df
+
+submission_df['filename'] = submission_df['filename'].str.replace('.jpg', '', regex=False)
+submission_df['label'] = predicted_classes  # 確保這裡的 'class' 是你的預測類別
+
+submission_df.to_csv('/content/sample_submission_new6.csv', index=False)  # 確保路徑正確
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# 設定參數
+img_width, img_height = 224, 224
+batch_size = 32
+
+
+train_data_dir = '/content/Train_new'
+test_data_dir = '/content/Test_new'
+
+##資料增強
+datagen = ImageDataGenerator(
+    rescale=1. / 255,  # 对图片的每个像素值进行缩放
+    rotation_range=15,  # 随机旋转的度数范围
+    width_shift_range=0.1,  # 随机水平移动的范围（相对于总宽度的比例）
+    height_shift_range=0.1,  # 随机垂直移动的范围（相对于总高度的比例）
+    shear_range=0.1,  # 随机剪切变换的程度
+    zoom_range=0.1,  # 随机缩放的范围
+    horizontal_flip=True,  # 随机水平翻转
+    fill_mode='nearest',  # 用于填充新创建像素的方法，如旋转或宽度/高度平移
+    validation_split=0.1  # 数据集的划分比例，20%用于验证
+)
+# 使用subset參數
+
+train_generator = datagen.flow_from_directory(
+    train_data_dir,
+    target_size=(img_width, img_height),
+    batch_size=batch_size,
+    class_mode='categorical',
+    subset='training',
+    classes=['Jennie', 'Jisoo', 'Lisa', 'Rose', 'Others']
+
+)
+
+validation_generator = datagen.flow_from_directory(
+    train_data_dir,
+    target_size=(img_width, img_height),
+    batch_size=batch_size,
+    class_mode='categorical',
+    shuffle=False,
+    subset='validation',  # 'validation' subset
+    classes=['Jennie', 'Jisoo', 'Lisa', 'Rose', 'Others']
+)
+
+
+
+
+
+# 讀取 sample.submission.csv 檔案
+submission_df = pd.read_csv('/content/SampleSubmission.csv')
+# 假設圖片是 JPG 格式，如果不是請相應調整
+submission_df['filename'] = submission_df['filename'].apply(lambda x: f'{x}.jpg')
+# 獲取 test_data_dir 中的所有檔案名稱
+available_filenames = os.listdir(test_data_dir)
+# 過濾出存在於資料夾中的圖片檔案
+submission_df = submission_df[submission_df['filename'].isin(available_filenames)]
+# 建立一個 DataFrame，包含排序後的圖片檔案名稱
+test_df = pd.DataFrame({
+    'filename': submission_df['filename']
+})
+
+
+
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+# 使用 flow_from_dataframe 方法
+test_generator = test_datagen.flow_from_dataframe(
+    dataframe=test_df,
+    directory=test_data_dir,
+    x_col='filename',
+    y_col=None,
+    target_size=(img_width, img_height),
+    color_mode='rgb',
+    class_mode=None,
+    batch_size=batch_size,
+    shuffle=False
+)
+
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, Dropout, Activation, GlobalAveragePooling2D, BatchNormalization
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.optimizers import Adam
+
+
+# 加载预训练模型，不包括顶层
+from tensorflow.keras.applications import EfficientNetB0
+base_model = EfficientNetB0(weights='imagenet', include_top=False)
+
+for layer in base_model.layers:
+    layer.trainable = False
+
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+
+# 简化的自定义层结构
+x = Dense(32, activation='relu')(x)  # 减少神经元数量
+x = Dropout(0.2)(x)  # 增加Dropout防止过拟合
+
+# 输出层
+predictions = Dense(5, activation='softmax')(x)
+
+model = Model(inputs=base_model.input, outputs=predictions)
+
+model.compile(optimizer=Adam(learning_rate=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
+
+
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+
+# 实例化回调函数
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',  # 监测的指标
+    factor=0.1,  # 学习率被减少的因数。新的学习率 = 学习率 * 因数
+    patience=3,  # 没有进步的训练轮数，在这之后学习率会被减少
+    min_lr=0.00001,  # 学习率的下限
+    verbose=1  # 更新信息的详细程度：0 = 安静，1 = 更新信息
+)
+
+checkpoint = ModelCheckpoint('best_model_weights.h5', monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+
+epochs = 40
+
+history = model.fit(
+    train_generator,
+    epochs=epochs,
+    validation_data=validation_generator,
+    callbacks=[checkpoint, reduce_lr ]    # 將 ModelCheckpoint 回調添加到訓練過程中
+)
+
+# 加載保存的最佳模型權重
+model.load_weights('best_model_weights.h5')
+
+# 獲取歷史數據
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs_range = range(1, len(acc) + 1)
+
+# Accuracy 曲線
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, acc, 'bo', label='train accuracy')
+plt.plot(epochs_range, val_acc, 'b', label='validation accuracy')
+plt.title('Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+# Loss 曲線
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, loss, 'bo', label='train loss')
+plt.plot(epochs_range, val_loss, 'b', label='validation loss')
+plt.title('Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+from sklearn.metrics import confusion_matrix
+
+# 1. 使用模型進行預測
+y_pred = model.predict(validation_generator)
+y_pred_classes = np.argmax(y_pred, axis=1)  # 取得預測的類別索引
+y_true = validation_generator.classes  # 取得真實的類別索引
+
+# 2. 產生混淆矩陣
+cm = confusion_matrix(y_true, y_pred_classes)
+
+# 3. 繪製混淆矩陣
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=validation_generator.class_indices, yticklabels=validation_generator.class_indices)
+plt.ylabel('Real class')
+plt.xlabel('Predict class')
+plt.title('confusion matrix')
+plt.show()
+
+from sklearn.metrics import classification_report
+import numpy as np
+
+# 1. 使用模型在驗證集上進行預測
+y_pred = model.predict(validation_generator)
+y_pred_classes = np.argmax(y_pred, axis=1)
+
+# 獲取真實的標籤
+y_true = validation_generator.classes
+
+# 2. 使用 scikit-learn 計算 precision 和 recall
+report = classification_report(y_true, y_pred_classes, target_names=list(validation_generator.class_indices.keys()))
+
+print(report)
+
